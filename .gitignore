@@ -1,0 +1,9 @@
+__pycache__/
+*.pyc
+build/
+dist/
+*.spec
+build_log.txt
+create_repo.py
+test_history.py
+history/
