@@ -1,6 +1,29 @@
 # Compound Structure Lookup
 
-🔬 化合物结构信息批量查询工具 — 双击 exe 即可使用，无需安装 Python 环境。
+🔬 化合物结构信息批量查询工具 — 两种使用方式，按需选择。
+
+## 两种使用方式
+
+| 方式 | 适合谁 | 说明 |
+|------|--------|------|
+| **📦 桌面 exe** | 所有用户 | 双击即用，无需 Python，无需 LLM，浏览器内操作 |
+| **🤖 AI Skill** | AI 平台开发者 | 导入 AI Coding 平台（如 Eureka/Claude/Cursor），批量调用，可嵌入工作流，支持二创 |
+
+### 桌面 exe 版本（免 LLM）
+
+- 双击 `compound-lookup.exe` → 浏览器自动打开 → 粘贴化合物列表 → 查询 → 下载 CSV/JSON
+- 无需安装任何环境，无需 API Key
+- 下载地址：[最新 Release](https://github.com/Philip0910732123/compound-structure-lookup/releases)
+
+### AI Skill 版本（需 LLM）
+
+- 将 `skill/` 目录导入 AI Coding 平台即可作为 Skill 调用
+- LLM 负责解析用户意图、调用脚本、展示结果；Python 脚本负责数据查询
+- 支持批量查询、进度回调、NDJSON 即时落盘、断点恢复
+- 消耗大模型 token，由用户按需选择
+- 其他开发者可 fork 做二创，嵌入自己的工作流
+
+---
 
 ## 功能
 
@@ -29,7 +52,7 @@
 | 数据来源 | 标注每个字段来自哪个数据源 |
 | 状态 | 完整 / 部分 / 部分(CAS未注册) / 失败 |
 
-## 使用方式
+## 桌面 exe 使用方式
 
 1. 下载 [最新 Release](https://github.com/Philip0910732123/compound-structure-lookup/releases) 中的 `compound-lookup.exe`
 2. 双击运行 → 浏览器自动打开 `http://127.0.0.1:5173`
@@ -38,10 +61,58 @@
 5. 点击"开始查询" → 实时查看进度和逐条结果
 6. 下载 CSV / JSON，或查看历史记录
 
+## AI Skill 使用方式
+
+### 安装
+
+将 `skill/` 目录导入 AI Coding 平台（如 Eureka）：
+
+```
+skill/
+├── SKILL.md                    # Skill 文档（skill-auditor v3.4 认证）
+├── skill.manifest.json          # 依赖声明
+├── references/
+│   └── usage.md                 # 使用说明
+└── scripts/
+    ├── compound_lookup.py       # 查询引擎（837行）
+    ├── selftest.py              # 5 项自检
+    └── main.py                  # 入口桩
+```
+
+### 调用示例
+
+在 AI 平台中直接说出需求：
+- "查询阿司匹林、布洛芬的结构信息"
+- "查询 osimertinib, furmonertinib"
+- 粘贴 SMILES 列表
+
+### Skill 依赖
+
+```
+rdkit      # Level 0 本地 InChIKey 计算（可选，未安装时自动跳过）
+requests   # 网络请求
+openpyxl   # Excel 解析
+```
+
+### Skill 与 exe 的能力对比
+
+| 能力 | 桌面 exe | AI Skill |
+|------|---------|---------|
+| 批量查询 | ✅ | ✅ |
+| Excel 上传 | ✅ | ✅ |
+| 结构式渲染 | ✅ SmilesDrawer | ❌ 返回结构图片 URL |
+| 历史记录 | ✅ | ❌ 由 AI 平台管理 |
+| 断点恢复 | ❌ | ✅ NDJSON + batch_state |
+| 进度回调 | ❌ | ✅ progress_callback |
+| RDKit Level 0 | ❌（exe 不含 RDKit） | ✅（skill 环境有 RDKit） |
+| 二创定制 | 改源码 | ✅ fork skill |
+| token 消耗 | 免费 | 消耗大模型 token |
+
 ## 数据源说明
 
 | 级别 | 数据源 | 获取字段 | 说明 |
 |------|--------|---------|------|
+| Level 0 | RDKit 本地 | InChIKey | 不消耗 API（仅 Skill 版本可用） |
 | Level 1 | NCI CACTUS | SMILES, CAS, IUPAC, 分子式, 分子量, InChIKey | 主力数据源 |
 | Level 2 | PubChem PUG REST + PUG-View | 全字段 + CID | CAS 四重提取策略 |
 | Level 2b | NIST Chemistry WebBook | CAS | 精确模式 |
@@ -73,6 +144,27 @@
 
 **Kekulé 双键状态机**：在 SMILES 传入 SmilesDrawer 前做逐字符状态机转换，将芳香原子（小写 c/n/o/s/b/p）的隐式键替换为交替 `=` 双键并大写，确保苯环显示为三条双键而非圆圈。
 
+## 仓库结构
+
+```
+compound-structure-lookup/
+├── app.py                      # exe 后端（Flask + 内嵌 HTML）
+├── compound_engine.py          # exe 查询引擎
+├── build_exe.py                # PyInstaller 构建脚本
+├── requirements.txt            # exe 依赖
+├── README.md
+├── LICENSE
+└── skill/                      # AI Skill 版本
+    ├── SKILL.md                # Skill 文档（skill-auditor v3.4 认证）
+    ├── skill.manifest.json
+    ├── references/
+    │   └── usage.md
+    └── scripts/
+        ├── compound_lookup.py  # 查询引擎
+        ├── selftest.py         # 自检脚本
+        └── main.py
+```
+
 ## 技术栈
 
 - Python 3.12 + Flask
@@ -80,7 +172,7 @@
 - openpyxl — Excel 解析
 - PyInstaller — exe 打包
 
-## 从源码运行
+## 从源码运行（exe 版本）
 
 ```bash
 pip install flask requests openpyxl
