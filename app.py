@@ -487,7 +487,39 @@ td img { border-radius: 4px; }
 .hist-btn-del:hover { background: #d4380d; }
 .hist-detail-meta { margin-bottom: 16px; font-size: 13px; color: #666; }
 </style>
-<script src="https://unpkg.com/@rdkit/rdkit@2024.3.4-1.0.0/dist/RDKit_minimal.js"></script>
+<script>
+// SmilesDrawer CDN 加载（纯JS，无需WASM，~100KB，默认CPK着色）
+var smilesDrawerLoaded = false;
+var smilesDrawerPromise = null;
+(function() {
+  function loadScript(url) {
+    return new Promise(function(resolve, reject) {
+      var s = document.createElement('script');
+      s.src = url;
+      s.onload = function() { resolve(url); };
+      s.onerror = function() { reject(new Error('Failed: ' + url)); };
+      document.head.appendChild(s);
+    });
+  }
+  var primary = 'https://cdn.jsdelivr.net/npm/smiles-drawer@2.4.1/dist/smiles-drawer.min.js';
+  var fallback = 'https://unpkg.com/smiles-drawer@2.4.1/dist/smiles-drawer.min.js';
+  smilesDrawerPromise = loadScript(primary)
+    .then(function() {
+      smilesDrawerLoaded = true;
+      console.log('[SmilesDrawer] loaded from jsdelivr');
+    })
+    .catch(function() {
+      console.log('[SmilesDrawer] jsdelivr failed, trying unpkg...');
+      return loadScript(fallback).then(function() {
+        smilesDrawerLoaded = true;
+        console.log('[SmilesDrawer] loaded from unpkg');
+      });
+    })
+    .catch(function() {
+      console.log('[SmilesDrawer] All CDNs failed, structure rendering unavailable');
+    });
+})();
+</script>
 </head>
 <body>
 <div class="container">
@@ -543,7 +575,7 @@ td img { border-radius: 4px; }
   </div>
 
   <div class="footer">
-    化合物结构信息查询工具 v3.5.1 · 数据源: NCI CACTUS / PubChem / NIST / Wikidata · RDKit.js 客户端结构渲染 · Excel 上传 · 历史记录 · 结构式灯箱 · 无需 API Key
+    化合物结构信息查询工具 v3.5.7 · 数据源: NCI CACTUS / PubChem / NIST / Wikidata · SmilesDrawer CPK着色渲染（Kekulé双键+白底+宽间距） · Excel 上传 · 历史记录 · 结构式灯箱 · 无需 API Key
   </div>
 </div>
 
@@ -594,102 +626,182 @@ td img { border-radius: 4px; }
 </div>
 
 <script>
-// ── RDKit.js 客户端结构式渲染（三级兜底）──
+// ── SmilesDrawer 客户端结构式渲染（三级兜底）──
 // Tier 1: PubChem PNG（有 CID 时直接用官方图片）
-// Tier 2: RDKit.js SVG（有 SMILES 时浏览器端 WASM 渲染）
-// Tier 3: CACTUS PNG（RDKit 不可用或渲染失败时的网络兜底）
-var rdkitModule = null;
-var rdkitInitPromise = null;
+// Tier 2: SmilesDrawer Canvas（有 SMILES 时纯JS渲染，CPK着色）
+// Tier 3: CACTUS PNG（SmilesDrawer 不可用或渲染失败时的网络兜底）
+var smilesDrawerInstance = null;
+var smilesDrawerInitPromise = null;
 
-function ensureRDKit() {
-  if (rdkitInitPromise) return rdkitInitPromise;
-  if (typeof initRDKitModule === 'undefined') {
-    rdkitInitPromise = Promise.resolve(null);
-    return rdkitInitPromise;
-  }
-  rdkitInitPromise = initRDKitModule({
-    locateFile: function(file) {
-      return 'https://unpkg.com/@rdkit/rdkit@2024.3.4-1.0.0/dist/' + file;
+function ensureSmilesDrawer() {
+  if (smilesDrawerInitPromise) return smilesDrawerInitPromise;
+  smilesDrawerInitPromise = (smilesDrawerPromise || Promise.resolve()).then(function() {
+    // v2.x API: SmiDrawer class
+    if (typeof SmiDrawer !== 'undefined') {
+      smilesDrawerInstance = new SmiDrawer({
+        width: 500, height: 500, bondThickness: 1.8,
+        shortBondLength: 0.85, bondSpacing: 6,
+        atomVisualization: 'default', isomeric: true,
+        debug: false, terminalCarbons: false, explicitHydrogens: false,
+        compactDrawing: false, fontSizeLarge: 11, fontSizeSmall: 3, padding: 12,
+        bondColor: '#222', backgroundFillColor: '#ffffff',
+        themes: { light: {
+          C: '#222', O: '#e00e0e', N: '#3050f8', F: '#1ff01f',
+          CL: '#1ff01f', BR: '#a62929', I: '#9c09d7', P: '#ff8000',
+          S: '#e6c200', B: '#ffb5b5', SI: '#f0c8a0', H: '#cccccc', BACKGROUND: '#ffffff'
+        }}
+      });
+      console.log('[SmilesDrawer] ready (v2 SmiDrawer)');
+      return smilesDrawerInstance;
     }
-  }).then(function(m) {
-    rdkitModule = m;
-    console.log('[RDKit.js] WASM ready');
-    return m;
+    // v1.x API: SmilesDrawer.Drawer + SmilesDrawer.parse
+    if (typeof SmilesDrawer !== 'undefined' && SmilesDrawer.Drawer) {
+      smilesDrawerInstance = {
+        draw: function(smiles, selector, theme) {
+          var drawer = new SmilesDrawer.Drawer({
+            width: 500, height: 500, bondThickness: 1.8,
+            shortBondLength: 0.85, bondSpacing: 6,
+            atomVisualization: 'default', isomeric: true,
+            compactDrawing: false, fontSizeLarge: 11, fontSizeSmall: 3, padding: 12,
+            bondColor: '#222', backgroundFillColor: '#ffffff'
+          });
+          SmilesDrawer.parse(smiles, function(tree) {
+            drawer.draw(tree, selector.replace('#', ''), theme, false);
+          });
+        }
+      };
+      console.log('[SmilesDrawer] ready (v1 SmilesDrawer)');
+      return smilesDrawerInstance;
+    }
+    console.log('[SmilesDrawer] not available');
+    return null;
   }).catch(function(e) {
-    console.log('[RDKit.js] init failed, using API fallback:', e);
+    console.log('[SmilesDrawer] init failed:', e);
     return null;
   });
-  return rdkitInitPromise;
+  return smilesDrawerInitPromise;
 }
 
-function svgToDataUrl(svgEl) {
-  try {
-    var svgData = new XMLSerializer().serializeToString(svgEl);
-    return 'data:image/svg+xml;base64,' + btoa(unescape(encodeURIComponent(svgData)));
-  } catch(e) { return ''; }
+function kekulizeSmiles(smiles) {
+  if (!smiles || !/[cnopsb]/.test(smiles)) return smiles;
+  var result = '', i = 0, toggle = true, lastAromatic = false;
+  var branchStack = [];
+  while (i < smiles.length) {
+    var ch = smiles[i];
+    // Bracket atom [nH] [n+] [c-]
+    if (ch === '[') {
+      var ci = smiles.indexOf(']', i);
+      if (ci > 0) {
+        var bc = smiles.substring(i, ci + 1);
+        var fa = bc.match(/[cnopsb]/);
+        if (fa) {
+          bc = bc.replace(fa[0], fa[0].toUpperCase());
+          if (lastAromatic) { if (toggle) result += '='; toggle = !toggle; }
+          lastAromatic = true;
+        } else { if (lastAromatic) toggle = true; lastAromatic = false; }
+        result += bc; i = ci + 1; continue;
+      }
+    }
+    // Two-letter atoms Cl Br Si
+    if (i + 1 < smiles.length && /[A-Z]/.test(ch) && /[a-z]/.test(smiles[i+1]) && !/[cnopsb]/.test(smiles[i+1])) {
+      if (lastAromatic) toggle = true;
+      result += ch + smiles[i+1]; lastAromatic = false; i += 2; continue;
+    }
+    // Aromatic atom
+    if (/[cnopsb]/.test(ch)) {
+      if (lastAromatic) { if (toggle) result += '='; toggle = !toggle; }
+      result += ch.toUpperCase(); lastAromatic = true; i++; continue;
+    }
+    // Ring closure (% for >9)
+    if (ch === '%' && i + 2 < smiles.length) { result += smiles.substring(i, i+3); i += 3; continue; }
+    if (/\d/.test(ch)) { result += ch; i++; continue; }
+    // Branch
+    if (ch === '(') { branchStack.push({t: toggle, a: lastAromatic}); result += ch; i++; continue; }
+    if (ch === ')') {
+      if (branchStack.length > 0) { var sv = branchStack.pop(); lastAromatic = sv.a; toggle = sv.t; }
+      result += ch; i++; continue;
+    }
+    if (ch === ':') { i++; continue; }
+    if (/[=#\-\/\\]/.test(ch)) { if (lastAromatic) toggle = true; result += ch; lastAromatic = false; i++; continue; }
+    if (/[A-Z]/.test(ch)) { if (lastAromatic) toggle = true; lastAromatic = false; }
+    result += ch; i++;
+  }
+  return result;
 }
 
-function renderStructWithRDKit(smiles, container, size) {
-  if (!rdkitModule || !smiles) return false;
+function renderStructWithSmilesDrawer(smiles, container, size, label) {
+  if (!smilesDrawerInstance || !smiles) return false;
   try {
-    var mol = rdkitModule.get_mol(smiles);
-    if (!mol || !mol.is_valid()) { if (mol) mol.delete(); return false; }
-    var svg = mol.get_svg(size, size);
-    mol.delete();
-    if (!svg) return false;
-    container.innerHTML = svg;
-    var svgEl = container.querySelector('svg');
-    if (svgEl) { svgEl.style.maxWidth = '100%'; svgEl.style.maxHeight = '100%'; }
+    var canvasId = 'sd-' + Math.random().toString(36).substr(2, 9);
+    container.innerHTML = '<canvas id="' + canvasId + '" width="' + size + '" height="' + size + '" style="max-width:100%;max-height:100%;background:#ffffff;border-radius:4px"></canvas>';
+    var kekSmiles = kekulizeSmiles(smiles);
+    smilesDrawerInstance.draw(kekSmiles, '#' + canvasId, 'light');
+    // Wait for async rendering, then convert canvas to data URL for hover/lightbox
+    setTimeout(function() {
+      var canvas = document.getElementById(canvasId);
+      if (!canvas) return;
+      try {
+        // 白色背景填充（destination-over: 在已有绘图下方填充，不覆盖）
+        var ctx = canvas.getContext('2d');
+        ctx.globalCompositeOperation = 'destination-over';
+        ctx.fillStyle = '#ffffff';
+        ctx.fillRect(0, 0, canvas.width, canvas.height);
+        ctx.globalCompositeOperation = 'source-over';
+        var dataUrl = canvas.toDataURL('image/png');
+        if (dataUrl && dataUrl.length > 1000) {
+          container.onmouseover = function(e) { showStructTooltip(dataUrl, label, e); };
+          container.onmousemove = moveStructTooltip;
+          container.onmouseout = hideStructTooltip;
+          container.onclick = function() { openStructLightbox(dataUrl, label); };
+        }
+      } catch(e) { console.log('[SmilesDrawer] canvas conversion error:', e); }
+    }, 200);
     return true;
-  } catch(e) { console.log('[RDKit] render error:', e); return false; }
+  } catch(e) {
+    console.log('[SmilesDrawer] render error:', e);
+    return false;
+  }
 }
 
 function createStructHtml(row, size) {
   var label = escapeHtml(row['英文名称'] || row['原始输入'] || '');
   var smiles = row['SMILES'] || '';
   var imgUrl = row['结构图片'] || '';
-  var isPubChem = imgUrl.indexOf('pubchem') !== -1;
 
-  // Tier 1: PubChem PNG — 直接用官方高清图
-  if (isPubChem && imgUrl) {
-    return '<img src="' + imgUrl + '" class="struct-thumb" style="max-width:' + size + 'px;max-height:' + size + 'px;border-radius:4px;cursor:pointer" loading="lazy" onerror="this.parentElement.innerHTML=\'—\'" onmouseover="showStructTooltip(this.src, \'' + label + '\', event)" onmousemove="moveStructTooltip(event)" onmouseout="hideStructTooltip()" onclick="openStructLightbox(this.src, \'' + label + '\')">';
+  if (!smiles && !imgUrl) return '—';
+
+  // 统一渲染管线：先用网络图片占位，再尝试 RDKit.js SVG 替换（所有化合物都走这条路）
+  var id = 'struct-' + Math.random().toString(36).substr(2, 9);
+  var html = '<div id="' + id + '" style="display:flex;align-items:center;justify-content:center;width:' + size + 'px;height:' + size + 'px;margin:0 auto;cursor:pointer">';
+  if (imgUrl) {
+    html += '<img src="' + imgUrl + '" style="max-width:' + size + 'px;max-height:' + size + 'px;border-radius:4px" loading="lazy" onerror="this.style.display=\'none\'">';
+  } else {
+    html += '<span style="color:#bbb;font-size:11px">渲染中…</span>';
   }
+  html += '</div>';
 
-  // Tier 2+3: RDKit.js SVG 渲染，CACTUS PNG 兜底
-  if (smiles || imgUrl) {
-    var id = 'struct-' + Math.random().toString(36).substr(2, 9);
-    var html = '<div id="' + id + '" style="display:flex;align-items:center;justify-content:center;width:' + size + 'px;height:' + size + 'px;margin:0 auto;cursor:pointer">';
-    if (imgUrl) {
-      // 先显示 CACTUS 兜底图，RDKit 成功后替换
-      html += '<img src="' + imgUrl + '" style="max-width:' + size + 'px;max-height:' + size + 'px;border-radius:4px" loading="lazy" onerror="this.style.display=\'none\'">';
-    } else {
-      html += '<span style="color:#bbb;font-size:11px">渲染中…</span>';
+  setTimeout(function() {
+    var container = document.getElementById(id);
+    if (!container) return;
+
+    // 先绑定兜底图事件
+    var imgEl = container.querySelector('img');
+    if (imgEl && imgUrl) {
+      container.onmouseover = function(e) { showStructTooltip(imgUrl, label, e); };
+      container.onmousemove = moveStructTooltip;
+      container.onmouseout = hideStructTooltip;
+      container.onclick = function() { openStructLightbox(imgUrl, label); };
     }
-    html += '</div>';
-    // 先绑定 CACTUS 兜底图事件（确保即使 RDKit 失败也有交互），再尝试 RDKit SVG 替换
-    setTimeout(function() {
-      var container = document.getElementById(id);
-      if (!container) return;
-      var imgEl = container.querySelector('img');
-      if (imgEl && imgUrl) {
-        container.onmouseover = function(e) { showStructTooltip(imgUrl, label, e); };
-        container.onmousemove = moveStructTooltip;
-        container.onmouseout = hideStructTooltip;
-        container.onclick = function() { openStructLightbox(imgUrl, label); };
-      }
-      ensureRDKit().then(function() {
-        if (!renderStructWithRDKit(smiles, container, size)) return;
-        var svgEl = container.querySelector('svg');
-        if (!svgEl) return;
-        container.onmouseover = function(e) { showStructTooltip(svgToDataUrl(svgEl), label, e); };
-        container.onmousemove = moveStructTooltip;
-        container.onmouseout = hideStructTooltip;
-        container.onclick = function() { openStructLightbox(svgToDataUrl(svgEl), label); };
+
+    // 尝试 SmilesDrawer Canvas 渲染（有 SMILES 就试，不管是否有 CID）
+    if (smiles) {
+      ensureSmilesDrawer().then(function() {
+        if (!renderStructWithSmilesDrawer(smiles, container, size, label)) return;
+        // SmilesDrawer 渲染成功，事件已在 renderStructWithSmilesDrawer 中更新
       });
-    }, 80);
-    return html;
-  }
-  return '—';
+    }
+  }, 80);
+  return html;
 }
 
 let currentTaskId = null;

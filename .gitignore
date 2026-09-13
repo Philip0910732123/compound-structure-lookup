@@ -5,5 +5,11 @@ dist/
 *.spec
 build_log.txt
 create_repo.py
+create_release.py
 test_history.py
+test_kekulize.py
+fix_smilesdrawer.py
+read_log.py
+retry_upload.py
+extract_err.py
 history/

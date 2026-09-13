@@ -6,8 +6,9 @@
 
 - **批量查询**：支持中英文名称 / SMILES / Excel 上传
 - **多级数据源兜底**：CACTUS → PubChem → NIST → Wikidata → CompTox
-- **RDKit.js 客户端结构式渲染**：基于 WebAssembly，浏览器端实时渲染 SMILES → SVG，零网络依赖
-- **三级结构式图片兜底**：PubChem PNG → RDKit.js SVG → CACTUS PNG
+- **SmilesDrawer 客户端结构式渲染**：纯 JavaScript，浏览器端实时渲染 SMILES → Canvas，CPK 着色，零网络依赖
+- **三级结构式图片兜底**：PubChem PNG → SmilesDrawer Canvas → CACTUS PNG
+- **Kekulé 双键渲染**：苯环显示为三条交替双键（非圆圈），双键间距加宽，清晰区分环己烷
 - **结构式交互**：悬停浮动大图跟随鼠标 + 点击全屏灯箱 + 鼠标滚轮缩放
 - **Excel 上传**：智能检测化合物列，无需固定格式，无需模板
 - **历史记录**：查询结果自动保存到 exe 同目录 `history/` 文件夹，带时间戳命名
@@ -24,7 +25,7 @@
 | 分子式 | 如 C9H8O4 |
 | 分子量 | 如 180.16 |
 | InChIKey | 国际化学标识符 |
-| 结构式图片 | PubChem PNG / RDKit.js SVG / CACTUS PNG |
+| 结构式图片 | PubChem PNG / SmilesDrawer Canvas / CACTUS PNG |
 | 数据来源 | 标注每个字段来自哪个数据源 |
 | 状态 | 完整 / 部分 / 部分(CAS未注册) / 失败 |
 
@@ -47,16 +48,35 @@
 | Level 2c | Wikidata SPARQL | CAS | 批量查询 |
 | Level 2d | EPA CompTox Dashboard | CAS | 兜底 |
 
-## 结构式渲染优先级
+## 结构式渲染
+
+**渲染引擎**：SmilesDrawer 2.4.1（纯 JavaScript，~100KB）
+
+**CPK 着色方案**：
+
+| 元素 | 颜色 | 色值 |
+|------|------|------|
+| 碳 C | 深灰 | #222 |
+| 氧 O | 红色 | #e00e0e |
+| 氮 N | 蓝色 | #3050f8 |
+| 硫 S | 黄色 | #e6c200 |
+| 氯 Cl | 绿色 | #1ff01f |
+| 磷 P | 橙色 | #ff8000 |
+| 溴 Br | 深红 | #a62929 |
+| 碘 I | 紫色 | #9c09d7 |
+
+**三级图片兜底**：
 
 1. **PubChem PNG** — 有 CID 时使用官方高清位图
-2. **RDKit.js SVG** — 有 SMILES 时浏览器端 WASM 渲染，矢量图，可无损缩放
+2. **SmilesDrawer Canvas** — 有 SMILES 时浏览器端渲染，CPK 着色，Kekulé 双键，白底
 3. **CACTUS PNG** — 最终兜底
+
+**Kekulé 双键状态机**：在 SMILES 传入 SmilesDrawer 前做逐字符状态机转换，将芳香原子（小写 c/n/o/s/b/p）的隐式键替换为交替 `=` 双键并大写，确保苯环显示为三条双键而非圆圈。
 
 ## 技术栈
 
 - Python 3.12 + Flask
-- RDKit.js (WebAssembly) — 客户端化学结构渲染
+- SmilesDrawer 2.4.1 — 客户端化学结构渲染
 - openpyxl — Excel 解析
 - PyInstaller — exe 打包
 
@@ -69,14 +89,40 @@ python app.py
 
 ## 版本历史
 
+### v3.5.7 (2026-09-13)
+- 加宽双键间距（bondSpacing 1.2→6px），苯环双键清晰区分环己烷
+- 加粗键线（bondThickness 1.5→1.8px）
+
+### v3.5.6 (2026-09-13)
+- 新增 `kekulizeSmiles()` 逐字符状态机，将芳香 SMILES 转为 Kekulé 结构
+- 苯环显示为三条交替双键，不再显示圆圈
+- 9 项 Python 单元测试全部通过（苯、吡啶、萘、噻吩、阿司匹林等）
+
+### v3.5.5 (2026-09-13)
+- 白色背景：SmilesDrawer 配置 + Canvas CSS + dataURL 导出三重白底保障
+- 苯环改为 Kekulé 双键（`compactDrawing: false`）
+
+### v3.5.4 (2026-09-13)
+- 用 SmilesDrawer 2.4.1 替换 RDKit.js（纯 JS，~100KB，无 WASM 依赖）
+- CPK 着色方案默认启用
+- 三级图片兜底：PubChem PNG → SmilesDrawer Canvas → CACTUS PNG
+
+### v3.5.3 (2026-09-13)
+- 修复 RDKit.js 竞态条件（脚本异步加载 Promise 追踪）
+- 统一渲染管线：所有化合物先网络图片占位再尝试 JS 渲染替换
+- 状态字段预计算：修复查询页状态显示红杠问题
+
+### v3.5.2 (2026-09-13)
+- 修复 RDKit.js CDN 版本号错误（2024.3.4-1.0.0 → 2025.3.4-1.0.0）
+- 双源容错：jsdelivr 主源 + unpkg 备源
+
 ### v3.5.1 (2026-09-13)
-- 修复 RDKit.js WASM 无法加载：添加 `locateFile` 配置指向 CDN 路径
-- 修复 CACTUS 兜底图无交互事件：先绑定悬停/点击事件再尝试 RDKit 替换
-- 修复查询页状态显示红杠：`query_compound()` 返回前预计算状态字段
-- 删除"六级数据源兜底"描述
+- 修复 RDKit.js WASM 无法加载：添加 locateFile 配置
+- 修复 CACTUS 兜底图无交互事件
+- 修复查询页状态显示红杠：query_compound() 返回前预计算状态
 
 ### v3.5-exe (2026-09-13)
-- 新增 RDKit.js 客户端结构式渲染（三级图片兜底）
+- 结构式渲染（初始 RDKit.js）
 - 结构式悬停浮动大图 + 点击全屏灯箱 + 鼠标滚轮缩放
 - Excel 上传智能列检测
 - 历史记录功能（自动保存 + 查看 + 下载 + 删除）
@@ -84,7 +130,6 @@ python app.py
 
 ### v3.0-exe
 - 首个 exe 版本
-- 六级数据源兜底
 - CSV/JSON 导出
 
 ## License
