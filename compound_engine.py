@@ -539,6 +539,11 @@ def query_compound(raw_name):
     elif row.get("SMILES"):
         row["结构图片"] = f"https://cactus.nci.nih.gov/chemical/structure/{quote(row['SMILES'], safe='')}/image?format=png"
 
+    # 预计算状态（富集前初判，富集后在 run() 中更新）
+    _cf = ["SMILES", "CAS号", "IUPAC名称"]
+    _n = sum(1 for k in _cf if row.get(k))
+    row["状态"] = "完整" if _n == 3 else ("部分" if _n > 0 and row.get("CAS号") else ("部分(CAS未注册)" if _n > 0 else "失败"))
+
     return row
 
 

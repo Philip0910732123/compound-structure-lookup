@@ -5,7 +5,7 @@
 ## 功能
 
 - **批量查询**：支持中英文名称 / SMILES / Excel 上传
-- **六级数据源兜底**：CACTUS → PubChem → NIST → Wikidata → CompTox
+- **多级数据源兜底**：CACTUS → PubChem → NIST → Wikidata → CompTox
 - **RDKit.js 客户端结构式渲染**：基于 WebAssembly，浏览器端实时渲染 SMILES → SVG，零网络依赖
 - **三级结构式图片兜底**：PubChem PNG → RDKit.js SVG → CACTUS PNG
 - **结构式交互**：悬停浮动大图跟随鼠标 + 点击全屏灯箱 + 鼠标滚轮缩放
@@ -68,6 +68,12 @@ python app.py
 ```
 
 ## 版本历史
+
+### v3.5.1 (2026-09-13)
+- 修复 RDKit.js WASM 无法加载：添加 `locateFile` 配置指向 CDN 路径
+- 修复 CACTUS 兜底图无交互事件：先绑定悬停/点击事件再尝试 RDKit 替换
+- 修复查询页状态显示红杠：`query_compound()` 返回前预计算状态字段
+- 删除"六级数据源兜底"描述
 
 ### v3.5-exe (2026-09-13)
 - 新增 RDKit.js 客户端结构式渲染（三级图片兜底）

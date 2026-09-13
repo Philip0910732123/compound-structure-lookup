@@ -493,7 +493,7 @@ td img { border-radius: 4px; }
 <div class="container">
   <div class="header">
     <h1>🔬 化合物结构信息查询工具</h1>
-    <p>支持中英文名称 / SMILES / Excel 上传 · 六级数据源兜底（CACTUS → PubChem → NIST → Wikidata） · 输出 SMILES / CAS / IUPAC / 分子式 / 分子量 / InChIKey / 结构式图片</p>
+    <p>支持中英文名称 / SMILES / Excel 上传 · 输出 SMILES / CAS / IUPAC / 分子式 / 分子量 / InChIKey / 结构式图片</p>
   </div>
 
   <div class="card">
@@ -543,7 +543,7 @@ td img { border-radius: 4px; }
   </div>
 
   <div class="footer">
-    化合物结构信息查询工具 v3.5-exe · 数据源: NCI CACTUS / PubChem / NIST / Wikidata · RDKit.js 客户端结构渲染 · Excel 上传 · 历史记录 · 结构式灯箱 · 无需 API Key
+    化合物结构信息查询工具 v3.5.1 · 数据源: NCI CACTUS / PubChem / NIST / Wikidata · RDKit.js 客户端结构渲染 · Excel 上传 · 历史记录 · 结构式灯箱 · 无需 API Key
   </div>
 </div>
 
@@ -607,7 +607,11 @@ function ensureRDKit() {
     rdkitInitPromise = Promise.resolve(null);
     return rdkitInitPromise;
   }
-  rdkitInitPromise = initRDKitModule().then(function(m) {
+  rdkitInitPromise = initRDKitModule({
+    locateFile: function(file) {
+      return 'https://unpkg.com/@rdkit/rdkit@2024.3.4-1.0.0/dist/' + file;
+    }
+  }).then(function(m) {
     rdkitModule = m;
     console.log('[RDKit.js] WASM ready');
     return m;
@@ -662,13 +666,19 @@ function createStructHtml(row, size) {
       html += '<span style="color:#bbb;font-size:11px">渲染中…</span>';
     }
     html += '</div>';
-    // 异步渲染：等 RDKit 就绪后尝试 SVG 替换
+    // 先绑定 CACTUS 兜底图事件（确保即使 RDKit 失败也有交互），再尝试 RDKit SVG 替换
     setTimeout(function() {
+      var container = document.getElementById(id);
+      if (!container) return;
+      var imgEl = container.querySelector('img');
+      if (imgEl && imgUrl) {
+        container.onmouseover = function(e) { showStructTooltip(imgUrl, label, e); };
+        container.onmousemove = moveStructTooltip;
+        container.onmouseout = hideStructTooltip;
+        container.onclick = function() { openStructLightbox(imgUrl, label); };
+      }
       ensureRDKit().then(function() {
-        var container = document.getElementById(id);
-        if (!container) return;
         if (!renderStructWithRDKit(smiles, container, size)) return;
-        // RDKit 渲染成功，绑定交互事件
         var svgEl = container.querySelector('svg');
         if (!svgEl) return;
         container.onmouseover = function(e) { showStructTooltip(svgToDataUrl(svgEl), label, e); };
