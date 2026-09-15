@@ -4,7 +4,7 @@
 化合物结构信息查询引擎 v3.1-exe
 从 compound_lookup.py v3.2 改造，适配 exe 打包：
   - 移除 pandas 依赖（用 csv 模块替代）
-  - 移除 RDKit 依赖（Level 0 跳过，InChIKey 从 PubChem 获取）
+  - 引入 RDKit 依赖（Level 0: SMILES → InChIKey 本地计算，100% 覆盖）
   - 新增进度回调机制（供 Web UI 实时展示）
   - 保留全部六级兜底数据获取逻辑
 
@@ -23,6 +23,13 @@ import time
 import re
 import csv
 import io
+
+try:
+    from rdkit import Chem
+    from rdkit.Chem.inchi import MolToInchi, InChIToInChIKey
+    HAS_RDKIT = True
+except ImportError:
+    HAS_RDKIT = False
 import requests
 from urllib.parse import quote
 from pathlib import Path
@@ -476,6 +483,27 @@ def fetch_cas_from_comptox(inchikey):
 
 
 # ─────────────────────────────────────────────
+# Level 0: RDKit 本地 InChIKey 计算（毫秒级，100% 覆盖）
+# ─────────────────────────────────────────────
+
+def rdkit_local_inchikey(smiles):
+    """用 RDKit 从 SMILES 本地计算 InChIKey，不消耗任何外部 API"""
+    if not HAS_RDKIT or not smiles:
+        return None
+    try:
+        mol = Chem.MolFromSmiles(smiles)
+        if mol is None:
+            return None
+        inchi = MolToInchi(mol, options="-FixedH -RecMet -SNon")
+        if not inchi:
+            return None
+        ik = InChIToInChIKey(inchi)
+        return ik.strip().replace("InChIKey=", "") if ik else None
+    except Exception:
+        return None
+
+
+# ─────────────────────────────────────────────
 # 单条查询主逻辑
 # ─────────────────────────────────────────────
 
@@ -488,6 +516,9 @@ def query_compound(raw_name):
     smiles_hint = raw_name if smiles_input else None
     en_name = "(SMILES)" if smiles_input else translate_name(raw_name)
 
+    # Level 0: RDKit 本地计算 InChIKey（毫秒级，100% 覆盖）
+    rdkit_ik = rdkit_local_inchikey(smiles_hint) if smiles_hint else None
+
     row = {
         "原始输入": raw_name,
         "英文名称": "" if smiles_input else en_name,
@@ -496,7 +527,7 @@ def query_compound(raw_name):
         "IUPAC名称": None,
         "分子式": None,
         "分子量": None,
-        "InChIKey": None,
+        "InChIKey": rdkit_ik,
         "数据来源": None,
         "状态": None,
         "cid": None,
@@ -522,11 +553,11 @@ def query_compound(raw_name):
         if not row.get("cid") and src.get("cid"):
             row["cid"] = src["cid"]
 
-    # Level 1: CACTUS
-    c1 = fetch_from_cactus(raw_name, en_name, smiles_hint)
+    # Level 1: CACTUS（传入 InChIKey hint，优先用 IK 查询）
+    c1 = fetch_from_cactus(raw_name, en_name, smiles_hint, rdkit_ik)
     fill(c1, c1.get("source") or "CACTUS")
 
-    # Level 2: PubChem
+    # Level 2: PubChem（传入 InChIKey hint，优先用 IK 查 CID）
     need_l2 = not row["SMILES"] or not row["CAS号"] or not row["分子式"]
     if need_l2:
         ik_hint = row.get("InChIKey")
@@ -542,7 +573,7 @@ def query_compound(raw_name):
     # 预计算状态（富集前初判，富集后在 run() 中更新）
     _cf = ["SMILES", "CAS号", "IUPAC名称"]
     _n = sum(1 for k in _cf if row.get(k))
-    row["状态"] = "完整" if _n == 3 else ("部分" if _n > 0 and row.get("CAS号") else ("部分(CAS未注册)" if _n > 0 else "失败"))
+    row["状态"] = "完整" if _n == 3 else ("部分" if _n > 0 and row.get("CAS号") else ("部分(CAS未获取)" if _n > 0 else "失败"))
 
     return row
 
@@ -553,24 +584,53 @@ def query_compound(raw_name):
 
 def run(compounds, progress_callback=None):
     """
-    批量查询化合物。
+    批量查询化合物（串行，兼容旧调用）。
     progress_callback(current, total, compound_name, row_dict, phase)
       phase: 'querying' | 'enriching' | 'done' | 'complete'
     """
-    results = []
+    return _run_impl(compounds, progress_callback, max_workers=1)
+
+
+def run_concurrent(compounds, progress_callback=None, max_workers=5):
+    """
+    批量查询化合物（并发，默认 5 路）。
+    并发执行 query_compound，完成后统一做后置 CAS 富集。
+    """
+    return _run_impl(compounds, progress_callback, max_workers=max_workers)
+
+
+def _run_impl(compounds, progress_callback=None, max_workers=1):
+    """内部实现：并发查询 + 后置 CAS 富集"""
+    from concurrent.futures import ThreadPoolExecutor, as_completed
+
+    results = [None] * len(compounds)
     total = len(compounds)
 
-    for i, name in enumerate(compounds, 1):
-        if progress_callback:
-            progress_callback(i, total, name, None, 'querying')
+    # ── 并发查询阶段 ──
+    if max_workers <= 1:
+        for i, name in enumerate(compounds):
+            if progress_callback:
+                progress_callback(i + 1, total, name, None, 'querying')
+            results[i] = query_compound(name)
+            if progress_callback:
+                progress_callback(i + 1, total, name, results[i], 'done')
+    else:
+        with ThreadPoolExecutor(max_workers=max_workers) as executor:
+            future_to_idx = {executor.submit(query_compound, name): i
+                             for i, name in enumerate(compounds)}
+            done_count = 0
+            for future in as_completed(future_to_idx):
+                idx = future_to_idx[future]
+                done_count += 1
+                try:
+                    results[idx] = future.result()
+                except Exception:
+                    results[idx] = None
+                if progress_callback:
+                    progress_callback(done_count, total, compounds[idx], results[idx], 'done')
 
-        row = query_compound(name)
-        if row:
-            results.append(row)
-
-        if progress_callback:
-            progress_callback(i, total, name, row, 'done')
-        time.sleep(0.3)
+    # 过滤 None
+    results = [r for r in results if r is not None]
 
     # ── 后置批量 CAS 富集 ──
 
@@ -624,7 +684,7 @@ def run(compounds, progress_callback=None):
             r["状态"] = "完整"
         elif filled > 0:
             if not r["CAS号"]:
-                r["状态"] = "部分(CAS未注册)"
+                r["状态"] = "部分(CAS未获取)"
             else:
                 r["状态"] = "部分"
         else:

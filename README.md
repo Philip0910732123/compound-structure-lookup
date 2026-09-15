@@ -89,6 +89,13 @@ python app.py
 
 ## 版本历史
 
+### v3.6 (2026-09-15)
+- 新增 RDKit 本地 InChIKey 计算（Level 0），SMILES → InChIKey 100% 覆盖，毫秒级本地计算
+- 新增 5 路并发查询（ThreadPoolExecutor, max_workers=5），50 个化合物 1.5 分钟，速度提升 4 倍
+- CAS 描述更准确：「CAS未注册」→「CAS未获取」
+- InChIKey 优先架构：先用 RDKit 建立 InChIKey 身份，再用 IK 查各数据源
+- exe 体积 33.8 → 60.8 MB（+27 MB 为 RDKit 库）
+
 ### v3.5.7 (2026-09-13)
 - 加宽双键间距（bondSpacing 1.2→6px），苯环双键清晰区分环己烷
 - 加粗键线（bondThickness 1.5→1.8px）

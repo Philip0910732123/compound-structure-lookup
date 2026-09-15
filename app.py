@@ -19,7 +19,7 @@ import glob
 import re
 
 from flask import Flask, request, jsonify, Response, send_file
-from compound_engine import run, parse_input, parse_excel, export_csv, export_json, COLUMNS
+from compound_engine import run, run_concurrent, parse_input, parse_excel, export_csv, export_json, COLUMNS
 
 app = Flask(__name__)
 
@@ -61,7 +61,7 @@ def save_history(task_id, compounds_input, results):
         total = len(results)
         complete = sum(1 for r in results if r.get("状态") == "完整")
         partial = sum(1 for r in results if r.get("状态") == "部分")
-        partial_nocas = sum(1 for r in results if r.get("状态") == "部分(CAS未注册)")
+        partial_nocas = sum(1 for r in results if r.get("状态") == "部分(CAS未获取)")
         fail = sum(1 for r in results if r.get("状态") == "失败")
 
         record = {
@@ -127,7 +127,7 @@ def api_query():
         # 在后台线程中运行查询
         def worker():
             try:
-                results = run(compounds, progress_callback=progress_cb)
+                results = run_concurrent(compounds, progress_callback=progress_cb, max_workers=5)
                 _results_store[task_id] = results
                 # 自动保存历史记录
                 save_history(task_id, compounds_text, results)
@@ -575,7 +575,7 @@ var smilesDrawerPromise = null;
   </div>
 
   <div class="footer">
-    化合物结构信息查询工具 v3.5.7 · 数据源: NCI CACTUS / PubChem / NIST / Wikidata · SmilesDrawer CPK着色渲染（Kekulé双键+白底+宽间距） · Excel 上传 · 历史记录 · 结构式灯箱 · 无需 API Key
+    化合物结构信息查询工具 v3.6 · 数据源: NCI CACTUS / PubChem / NIST / Wikidata · SmilesDrawer CPK着色渲染（Kekulé双键+白底+宽间距） · Excel 上传 · 历史记录 · 结构式灯箱 · 无需 API Key
   </div>
 </div>
 
@@ -919,7 +919,7 @@ function addTableRow(idx, row) {
   const tr = document.createElement('tr');
   const statusClass = row['状态'] === '完整' ? 'status-complete'
     : row['状态'] === '部分' ? 'status-partial'
-    : row['状态'] === '部分(CAS未注册)' ? 'status-partial-nocas'
+    : row['状态'] === '部分(CAS未获取)' ? 'status-partial-nocas'
     : 'status-fail';
   const sources = (row['数据来源'] || '').split('+').map(s =>
     '<span class="source-tag">' + escapeHtml(s) + '</span>').join('');
@@ -944,13 +944,13 @@ function updateStats() {
   const total = queryResults.length;
   const complete = queryResults.filter(r => r['状态'] === '完整').length;
   const partial = queryResults.filter(r => r['状态'] === '部分').length;
-  const partialNoCas = queryResults.filter(r => r['状态'] === '部分(CAS未注册)').length;
+  const partialNoCas = queryResults.filter(r => r['状态'] === '部分(CAS未获取)').length;
   const fail = queryResults.filter(r => r['状态'] === '失败').length;
   document.getElementById('stats-bar').innerHTML =
     statItem('总计', total)
     + statItem('完整', complete, '#52c41a')
     + statItem('部分', partial, '#faad14')
-    + statItem('CAS未注册', partialNoCas, '#1890ff')
+    + statItem('CAS未获取', partialNoCas, '#1890ff')
     + statItem('失败', fail, '#f5222d');
 }
 
@@ -1091,7 +1091,7 @@ async function viewHistDetail(filename) {
     results.forEach((row, i) => {
       const statusClass = row['状态'] === '完整' ? 'status-complete'
         : row['状态'] === '部分' ? 'status-partial'
-        : row['状态'] === '部分(CAS未注册)' ? 'status-partial-nocas'
+        : row['状态'] === '部分(CAS未获取)' ? 'status-partial-nocas'
         : 'status-fail';
       const sources = (row['数据来源'] || '').split('+').map(s2 =>
         '<span class="source-tag">' + escapeHtml(s2) + '</span>').join('');
