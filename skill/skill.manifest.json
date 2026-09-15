@@ -1,0 +1,25 @@
+{
+  "name": "compound-structure-lookup",
+  "version": "3.3",
+  "description": "化合物结构信息批量查询工具，多级数据源获取 SMILES、CAS号、IUPAC名称、分子式、分子量、InChIKey",
+  "author": "",
+  "alias": "",
+  "salt": "",
+  "exclude_paths": [],
+  "runtime": {
+    "python_version": "3.12",
+    "dependencies": [
+      "openpyxl",
+      "rdkit",
+      "requests"
+    ],
+    "isolated_env": false
+  },
+  "credentials": [],
+  "mcp_dependencies": [],
+  "tests": [
+    "basic_flow",
+    "selftest"
+  ],
+  "outputs": []
+}
